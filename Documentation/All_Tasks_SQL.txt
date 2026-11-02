@@ -1,0 +1,368 @@
+CREATE DATABASE fedex_logistics;
+USE fedex_logistics;
+
+
+SELECT * FROM fedex_orders LIMIT 5;
+
+SELECT Order_ID, COUNT(*)
+FROM fedex_orders
+GROUP BY Order_ID
+HAVING COUNT(*) > 1;
+
+DELETE o1 FROM fedex_orders o1
+JOIN fedex_orders o2
+ON o1.Order_ID = o2.Order_ID
+AND o1.Customer_ID > o2.Customer_ID;
+
+SELECT Shipment_ID, COUNT(*)
+FROM fedex_shipments
+GROUP BY Shipment_ID
+HAVING COUNT(*) > 1;
+
+UPDATE fedex_shipments s
+JOIN (
+    SELECT Route_ID, AVG(Delay_Hours) AS avg_delay
+    FROM fedex_shipments
+    WHERE Delay_Hours IS NOT NULL
+    GROUP BY Route_ID
+) r 
+ON s.Route_ID = r.Route_ID
+SET s.Delay_Hours = r.avg_delay
+WHERE s.Delay_Hours IS NULL;
+
+
+UPDATE fedex_orders
+SET Order_Date = STR_TO_DATE(Order_Date, '%Y-%m-%d %H:%i:%s')
+WHERE Order_ID IS NOT NULL;
+
+UPDATE fedex_shipments
+SET Pickup_Date = STR_TO_DATE(Pickup_Date, '%Y-%m-%d %H:%i:%s'),
+    Delivery_Date = STR_TO_DATE(Delivery_Date, '%Y-%m-%d %H:%i:%s')
+WHERE Shipment_ID IS NOT NULL;
+
+
+SELECT *
+FROM fedex_shipments
+WHERE Delivery_Date < Pickup_Date;
+
+SELECT o.Route_ID
+FROM fedex_orders o
+LEFT JOIN fedex_routes r ON o.Route_ID = r.Route_ID
+WHERE r.Route_ID IS NULL;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Task-2
+SELECT Shipment_ID,
+       TIMESTAMPDIFF(HOUR, Pickup_Date, Delivery_Date) AS Transit_Hours
+FROM fedex_shipments;  #Actual Transit Time
+
+
+#This shows how long delivery actually took.
+
+SELECT Route_ID, AVG(Delay_Hours) AS Avg_Delay
+FROM fedex_shipments
+GROUP BY Route_ID
+ORDER BY Avg_Delay DESC
+LIMIT 10;
+
+
+#Shows worst shipments handled by each warehouse.
+
+SELECT Shipment_ID, Warehouse_ID, Delay_Hours,
+       RANK() OVER (PARTITION BY Warehouse_ID ORDER BY Delay_Hours DESC) AS Delay_Rank
+FROM fedex_shipments;
+
+#Avg Delay by Delivery Type
+
+SELECT o.Delivery_Type, AVG(s.Delay_Hours) AS Avg_Delay
+FROM fedex_shipments s
+JOIN fedex_orders o ON s.Order_ID = o.Order_ID
+GROUP BY o.Delivery_Type;
+
+# On-Time vs Delayed
+
+SELECT CASE WHEN Delay_Hours <= 0 THEN 'On-Time' ELSE 'Delayed' END AS Status,
+       COUNT(*) AS Shipments
+FROM fedex_shipments
+GROUP BY CASE WHEN Delay_Hours <= 0 THEN 'On-Time' ELSE 'Delayed' END;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Task-3
+#Avg Transit Time per Route
+
+SELECT Route_ID,
+       AVG(TIMESTAMPDIFF(HOUR, Pickup_Date, Delivery_Date)) AS Avg_Transit_Time
+FROM fedex_shipments
+GROUP BY Route_ID;
+
+# Avg Delay per Route
+
+SELECT Route_ID, AVG(Delay_Hours) AS Avg_Delay
+FROM fedex_shipments
+GROUP BY Route_ID;
+
+# Distance-to-Time Efficiency Ratio
+
+SELECT r.Route_ID,
+       r.Distance_KM / r.Avg_Transit_Time_Hours AS Efficiency_Ratio
+FROM fedex_routes r;
+
+# Worst 3 Routes
+
+SELECT Route_ID,
+       Distance_KM / Avg_Transit_Time_Hours AS Efficiency_Ratio
+FROM fedex_routes
+ORDER BY Efficiency_Ratio ASC
+LIMIT 3;
+
+# Routes with >20% delayed shipments
+
+SELECT Route_ID,
+       SUM(CASE WHEN Delay_Hours > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS Delay_Percent
+FROM fedex_shipments
+GROUP BY Route_ID
+HAVING Delay_Percent > 20;
+
+
+
+
+
+
+
+
+
+
+
+Task-4
+# Warehouse Performance
+
+SELECT Warehouse_ID, AVG(Delay_Hours) AS Avg_Delay
+FROM fedex_shipments
+GROUP BY Warehouse_ID
+ORDER BY Avg_Delay DESC
+LIMIT 3;
+
+SELECT Warehouse_ID,
+       COUNT(*) AS Total_Shipments,
+       SUM(CASE WHEN Delay_Hours > 0 THEN 1 ELSE 0 END) AS Delayed_Shipments
+FROM fedex_shipments
+GROUP BY Warehouse_ID;
+
+
+
+
+
+
+
+
+
+
+
+
+Task-5
+# Delivery Agent Performance
+
+SELECT 
+    s.Route_ID,
+    s.Agent_ID,
+    SUM(CASE WHEN s.Delay_Hours <= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS OnTime_Percent,
+    RANK() OVER (
+        PARTITION BY s.Route_ID 
+        ORDER BY SUM(CASE WHEN s.Delay_Hours <= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) DESC
+    ) AS Agent_Rank_On_Route
+FROM fedex_shipments s
+GROUP BY s.Route_ID, s.Agent_ID;
+
+# Agents with on-time % below 85%
+
+SELECT 
+    s.Agent_ID,
+    SUM(CASE WHEN s.Delay_Hours <= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS OnTime_Percent
+FROM fedex_shipments s
+GROUP BY s.Agent_ID
+HAVING OnTime_Percent < 85;
+
+# Compare top 5 vs bottom 5 agents
+
+WITH Agent_Performance AS (
+    SELECT 
+        s.Agent_ID,
+        SUM(CASE WHEN s.Delay_Hours <= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS OnTime_Percent
+    FROM fedex_shipments s
+    GROUP BY s.Agent_ID
+),
+
+Top_Agents AS (
+    SELECT Agent_ID
+    FROM Agent_Performance
+    ORDER BY OnTime_Percent DESC
+    LIMIT 5
+),
+
+Bottom_Agents AS (
+    SELECT Agent_ID
+    FROM Agent_Performance
+    ORDER BY OnTime_Percent ASC
+    LIMIT 5
+)
+
+SELECT 
+    'Top 5 Agents' AS Category,
+    AVG(a.Avg_Rating) AS Avg_Rating,
+    AVG(a.Experience_Years) AS Avg_Experience
+FROM fedex_delivery_agents a
+JOIN Top_Agents t ON a.Agent_ID = t.Agent_ID
+
+UNION ALL
+
+SELECT 
+    'Bottom 5 Agents',
+    AVG(a.Avg_Rating),
+    AVG(a.Experience_Years)
+FROM fedex_delivery_agents a
+JOIN Bottom_Agents b ON a.Agent_ID = b.Agent_ID;
+
+
+
+
+
+
+
+
+
+
+
+
+
+Task-6
+# Latest status of each shipment
+
+SELECT 
+    Shipment_ID,
+    Delivery_Status,
+    Delivery_Date
+FROM fedex_shipments;
+
+# Routes where MOST shipments are still “In Transit” or “Returned
+
+SELECT 
+    Route_ID,
+    SUM(CASE WHEN Delivery_Status IN ('In Transit', 'Returned') THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS Problematic_Percent
+FROM fedex_shipments
+GROUP BY Route_ID
+HAVING Problematic_Percent > 50;
+
+# Most frequent delay patterns
+
+SELECT 
+    CASE 
+        WHEN Delay_Hours BETWEEN 1 AND 24 THEN 'Minor Delay'
+        WHEN Delay_Hours BETWEEN 25 AND 72 THEN 'Moderate Delay'
+        WHEN Delay_Hours > 72 THEN 'Severe Delay'
+        ELSE 'On Time'
+    END AS Delay_Category,
+    COUNT(*) AS Count
+FROM fedex_shipments
+GROUP BY Delay_Category;
+
+# Shipments with extreme delay
+
+SELECT 
+    Shipment_ID,
+    Route_ID,
+    Warehouse_ID,
+    Delay_Hours
+FROM fedex_shipments
+WHERE Delay_Hours > 120;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Task-7
+# Average Delivery Delay per Source Country
+
+SELECT 
+    r.Source_Country,
+    AVG(s.Delay_Hours) AS Avg_Delay
+FROM fedex_shipments s
+JOIN fedex_routes r ON s.Route_ID = r.Route_ID
+GROUP BY r.Source_Country;
+
+# On-Time Delivery %
+
+SELECT 
+    SUM(CASE WHEN Delay_Hours <= 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS OnTime_Percent
+FROM fedex_shipments;
+
+# Average Delay per Route
+
+SELECT 
+    Route_ID,
+    AVG(Delay_Hours) AS Avg_Delay
+FROM fedex_shipments
+GROUP BY Route_ID;
+
+# Warehouse Utilization
+SELECT 
+    w.Warehouse_ID,
+    COUNT(s.Shipment_ID) * 100.0 / w.Capacity_per_day AS Utilization_Percent
+FROM fedex_warehouses w
+LEFT JOIN fedex_shipments s 
+    ON w.Warehouse_ID = s.Warehouse_ID
+GROUP BY w.Warehouse_ID, w.Capacity_per_day;
+
+
+
+

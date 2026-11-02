@@ -1,0 +1,12 @@
+# Video files
+*.mp4
+*.mov
+
+# Temporary files
+*.tmp
+*.log
+
+# Operating system
+Thumbs.db
+.DS_Store
+desktop.ini
